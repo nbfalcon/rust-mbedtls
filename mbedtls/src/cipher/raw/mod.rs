@@ -10,7 +10,7 @@ use core::convert::TryFrom;
 
 use mbedtls_sys::*;
 
-use crate::error::{IntoResult, Result, codes};
+use crate::error::{codes, IntoResult, Result};
 
 #[cfg(not(feature = "std"))]
 use crate::alloc_prelude::*;
@@ -32,7 +32,7 @@ define!(
 );
 
 impl TryFrom<cipher_id_t> for CipherId {
-    type Error =  crate::error::Error;
+    type Error = crate::error::Error;
 
     fn try_from(inner: cipher_id_t) -> Result<Self> {
         match inner {
@@ -226,26 +226,19 @@ impl Cipher {
             ::mbedtls_sys::cipher_init(inner.as_mut_ptr());
             inner.assume_init()
         };
-        Cipher {
-            inner,
-            iv: None,
-        }
+        Cipher { inner, iv: None }
     }
 
     // Setup routine - this should be the first function called
     // it combines several steps into one call here, they are
     // Cipher init, Cipher setup
-    pub fn setup(
-        cipher_id: CipherId,
-        cipher_mode: CipherMode,
-        key_bit_len: u32,
-    ) -> Result<Cipher> {
+    pub fn setup(cipher_id: CipherId, cipher_mode: CipherMode, key_bit_len: u32) -> Result<Cipher> {
         let mut ret = Self::init();
         unsafe {
             // Do setup with proper cipher_info based on algorithm, key length and mode
             cipher_setup(
                 &mut ret.inner,
-                cipher_info_from_values(cipher_id.into(), key_bit_len as i32, cipher_mode.into())
+                cipher_info_from_values(cipher_id.into(), key_bit_len as i32, cipher_mode.into()),
             )
             .into_result()?;
         }
@@ -302,7 +295,7 @@ impl Cipher {
                 indata.as_ptr(),
                 indata.len(),
                 outdata.as_mut_ptr(),
-                &mut olen
+                &mut olen,
             )
             .into_result()?;
         }
@@ -334,7 +327,7 @@ impl Cipher {
 
     // Utility function to get block size for the selected / setup cipher_info
     pub fn block_size(&self) -> usize {
-        unsafe { cipher_get_block_size(&self.inner) as usize}
+        unsafe { cipher_get_block_size(&self.inner) as usize }
     }
 
     // Utility function to get IV size for the selected / setup cipher_info
@@ -379,8 +372,12 @@ impl Cipher {
     /// ```
     pub fn is_authenticated(&self) -> bool {
         match self.cipher_mode() {
-            CipherMode::GCM | CipherMode::CCM | CipherMode::CCM_STAR_NO_TAG |
-            CipherMode::CHACHAPOLY | CipherMode::KW | CipherMode::KWP => true,
+            CipherMode::GCM
+            | CipherMode::CCM
+            | CipherMode::CCM_STAR_NO_TAG
+            | CipherMode::CHACHAPOLY
+            | CipherMode::KW
+            | CipherMode::KWP => true,
             _ => false,
         }
     }
@@ -429,11 +426,13 @@ impl Cipher {
     ) -> Result<usize> {
         let cipher_mode = self.cipher_mode();
         if cipher_mode != CipherMode::KW
-        && cipher_mode != CipherMode::KWP
-        && self.is_authenticated()
-        && cipher_and_tag.len()
+            && cipher_mode != CipherMode::KWP
+            && self.is_authenticated()
+            && cipher_and_tag
+                .len()
                 .checked_sub(tag_len)
-                .map_or(true, |cipher_len| cipher_len < plain_text.len()) {
+                .map_or(true, |cipher_len| cipher_len < plain_text.len())
+        {
             return Err(codes::CipherBadInputData.into());
         }
         let iv = self.iv.as_ref().ok_or(codes::CipherBadInputData)?;
@@ -488,11 +487,13 @@ impl Cipher {
         // AES KW and KWP cipher mode
         let cipher_mode = self.cipher_mode();
         if cipher_mode != CipherMode::KW
-        && cipher_mode != CipherMode::KWP
-        && self.is_authenticated()
-        && cipher_and_tag.len()
+            && cipher_mode != CipherMode::KWP
+            && self.is_authenticated()
+            && cipher_and_tag
+                .len()
                 .checked_sub(tag_len)
-                .map_or(true, |cipher_len| plain_text.len() < cipher_len) {
+                .map_or(true, |cipher_len| plain_text.len() < cipher_len)
+        {
             return Err(codes::CipherBadInputData.into());
         }
 
@@ -653,12 +654,18 @@ impl Cipher {
         }
         self.reset()?;
         unsafe {
-            cipher_cmac(&*self.inner.private_cipher_info, key.as_ptr(), (key.len() * 8) as _, data.as_ptr(), data.len(), 
-                        outdata.as_mut_ptr()).into_result()?;
+            cipher_cmac(
+                &*self.inner.private_cipher_info,
+                key.as_ptr(),
+                (key.len() * 8) as _,
+                data.as_ptr(),
+                data.len(),
+                outdata.as_mut_ptr(),
+            )
+            .into_result()?;
         }
         Ok(())
     }
-
 }
 
 #[test]
@@ -690,7 +697,14 @@ fn one_part_ecb() {
 fn cmac_test() {
     let mut c = Cipher::setup(CipherId::Aes, CipherMode::ECB, 128).unwrap();
     let mut out = [0u8; 16];
-    c.cmac(b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
-           b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff", &mut out).expect("Success in CMAC");
-    assert_eq!(&out, b"\x38\x7b\x36\x22\x8b\xa7\x77\x44\x5b\xaf\xa0\x36\x45\xb9\x40\x10");
+    c.cmac(
+        b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+        b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+        &mut out,
+    )
+    .expect("Success in CMAC");
+    assert_eq!(
+        &out,
+        b"\x38\x7b\x36\x22\x8b\xa7\x77\x44\x5b\xaf\xa0\x36\x45\xb9\x40\x10"
+    );
 }

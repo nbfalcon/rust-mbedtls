@@ -40,7 +40,7 @@ impl bindgen::callbacks::ParseCallbacks for MbedtlsParseCallbacks {
         &self,
         _enum_name: Option<&str>,
         original_variant_name: &str,
-        _variant_value: bindgen::callbacks::EnumVariantValue
+        _variant_value: bindgen::callbacks::EnumVariantValue,
     ) -> Option<String> {
         self.item_name(original_variant_name)
     }
@@ -53,7 +53,11 @@ impl bindgen::callbacks::ParseCallbacks for MbedtlsParseCallbacks {
         }
     }
 
-    fn blocklisted_type_implements_trait(&self, _name: &str, derive_trait: bindgen::callbacks::DeriveTrait) -> Option<bindgen::callbacks::ImplementsTrait> {
+    fn blocklisted_type_implements_trait(
+        &self,
+        _name: &str,
+        derive_trait: bindgen::callbacks::DeriveTrait,
+    ) -> Option<bindgen::callbacks::ImplementsTrait> {
         if derive_trait == bindgen::callbacks::DeriveTrait::Default {
             Some(bindgen::callbacks::ImplementsTrait::Manually)
         } else {
@@ -77,7 +81,13 @@ impl super::BuildConfig {
         }
         cc.include(&self.mbedtls_include).define(
             "MBEDTLS_CONFIG_FILE",
-            Some(format!(r#""{}""#, self.config_h.to_str().expect("config.h UTF-8 error")).as_str()),
+            Some(
+                format!(
+                    r#""{}""#,
+                    self.config_h.to_str().expect("config.h UTF-8 error")
+                )
+                .as_str(),
+            ),
         );
         for cflag in &self.cflags {
             cc.flag(cflag);
@@ -101,22 +111,38 @@ impl super::BuildConfig {
             };
         }
 
-
         // generate static function wrappers without any other rust related parameters to ensure
         // correctness of result C code
         bindgen::builder()
-            .clang_args(cc.get_compiler().args().iter().map(|arg| arg.to_str().unwrap()))
-            .header_contents("bindgen-input.h", &header)
+            .clang_args(
+                cc.get_compiler()
+                    .args()
+                    .iter()
+                    .map(|arg| arg.to_str().unwrap()),
+            )
+            .header_contents("bindgen-static.h", &header)
             .allowlist_function("^(?i)mbedtls_.*")
             .wrap_static_fns(true)
             .wrap_static_fns_path(&self.static_wrappers_c)
-            .generate().expect("bindgen error");
+            .generate()
+            .expect("bindgen error");
 
         // use headers with static function wrappers to generate bindings
-        let static_wrappers_code = fs::read_to_string(&self.static_wrappers_c).expect("read static_wrappers.c I/O error");
+        let mut static_wrappers_code =
+            fs::read_to_string(&self.static_wrappers_c).expect("read static_wrappers.c I/O error");
+        static_wrappers_code = static_wrappers_code.lines().map(|l| {
+            if l == "unsigned char * [32] mbedtls_ssl_session_get_id__extern(const mbedtls_ssl_session *session) { return mbedtls_ssl_session_get_id(session); }" {
+                // Work around a bug in bindgen: this one signature is generated incorrectly, because of course C does not have sane parsing rules for array types
+                // It's not like the return type of a function could go at the start, or at the end; no, if arrays are involved, the function gets hugged to death syntactically.
+                "unsigned char (* mbedtls_ssl_session_get_id__extern(const mbedtls_ssl_session *session))[32] { return mbedtls_ssl_session_get_id(session); }"
+                .to_owned()
+            } else {
+                l.to_owned()
+            }
+        }).reduce(|l, r| l + &r + "\n").unwrap_or_else(String::new);
         let header = format!("{}\n{}", &header, static_wrappers_code);
         // generate bindings for `mbedtls` code
-        let bindings = bindgen_builder(&cc, &header)
+        let bindings = bindgen_builder(&cc, &header, "mbedtls-bindings.h")
             .allowlist_function("^(?i)mbedtls_.*")
             .allowlist_type("^(?i)mbedtls_.*")
             .allowlist_var("^(?i)mbedtls_.*")
@@ -125,14 +151,14 @@ impl super::BuildConfig {
             .expect("bindgen mbedtls error")
             .to_string();
         // generate bindings for `psa` code
-        let psa_bindings = bindgen_builder(&cc, &header)
+        let psa_bindings = bindgen_builder(&cc, &header, "psa-bindings.h")
             .allowlist_function("^(?i)psa_.*")
             .allowlist_type("^(?i)psa_.*")
             .allowlist_var("^(?i)psa_.*")
             .generate()
             .expect("bindgen psa error")
             .to_string();
-        // update static function wrappers code with header for later compilation 
+        // update static function wrappers code with header for later compilation
         fs::write(&self.static_wrappers_c, &header).expect("write static_wrappers.c I/O error");
 
         let bindings_rs = self.out_dir.join("bindings.rs");
@@ -140,11 +166,18 @@ impl super::BuildConfig {
             .and_then(|mut f| {
                 f.write_all(bindings.as_bytes())?;
                 // put bindings of psa code inside a module
-                f.write_all(format!("pub mod psa {{\n{}{}\n}}\n", "use super::*;\n",psa_bindings).as_bytes())?;
+                f.write_all(
+                    format!(
+                        "pub mod psa {{\n{}{}\n}}\n",
+                        "use super::*;\n", psa_bindings
+                    )
+                    .as_bytes(),
+                )?;
                 f.write_all(b"use self::psa::*;\n")?;
                 f.write_all(b"use crate::types::*;\n")?; // for FILE, time_t, etc.
                 Ok(())
-            }).expect("bindings.rs I/O error");
+            })
+            .expect("bindings.rs I/O error");
 
         let mod_bindings = self.out_dir.join("mod-bindings.rs");
         fs::write(mod_bindings, b"mod bindings;\n").expect("mod-bindings.rs I/O error");
@@ -152,11 +185,16 @@ impl super::BuildConfig {
 }
 
 // create a bindgen builder with common parameters
-fn bindgen_builder(cc: &cc::Build, header: &String) -> bindgen::Builder {
+fn bindgen_builder(cc: &cc::Build, header_contents: &str, header_name: &str) -> bindgen::Builder {
     bindgen::builder()
         .enable_function_attribute_detection()
-        .clang_args(cc.get_compiler().args().iter().map(|arg| arg.to_str().unwrap()))
-        .header_contents("bindgen-input.h", header)
+        .clang_args(
+            cc.get_compiler()
+                .args()
+                .iter()
+                .map(|arg| arg.to_str().unwrap()),
+        )
+        .header_contents(header_name, header_contents)
         .allowlist_recursively(false)
         .blocklist_type("^mbedtls_time_t$")
         .blocklist_item("^(?i)mbedtls_.*vsnprintf")
@@ -172,4 +210,3 @@ fn bindgen_builder(cc: &cc::Build, header: &String) -> bindgen::Builder {
         .translate_enum_integer_types(true)
         .layout_tests(false)
 }
-

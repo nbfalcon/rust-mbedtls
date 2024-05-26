@@ -6,7 +6,6 @@
  * option. This file may not be copied, modified, or distributed except
  * according to those terms. */
 
-#![deny(warnings)]
 // TODO: this is added to ensure `#![allow(ambiguous_glob_reexports)]` also works
 // in rust with old version, need to be removed after migration to rustc 1.70..,
 // See issue #277
@@ -18,7 +17,6 @@
 
 #[cfg(not(any(feature = "std", feature = "no_std_deps")))]
 compile_error!("Either the `std` or `no_std_deps` feature needs to be enabled");
-
 
 #[macro_use]
 extern crate bitflags;
@@ -43,10 +41,10 @@ pub mod ecp;
 pub mod hash;
 pub mod pk;
 pub mod rng;
-pub use mbedtls_platform_support::self_test as self_test;
+pub use mbedtls_platform_support::self_test;
+pub mod alloc;
 pub mod ssl;
 pub mod x509;
-pub mod alloc;
 
 // ==============
 //    Utility
@@ -96,13 +94,13 @@ extern crate alloc as rust_alloc;
 #[cfg(not(feature = "std"))]
 mod alloc_prelude {
     #![allow(unused)]
+    pub(crate) use rust_alloc::borrow::Cow;
     pub(crate) use rust_alloc::borrow::ToOwned;
     pub(crate) use rust_alloc::boxed::Box;
-    pub(crate) use rust_alloc::sync::Arc;
     pub(crate) use rust_alloc::string::String;
     pub(crate) use rust_alloc::string::ToString;
+    pub(crate) use rust_alloc::sync::Arc;
     pub(crate) use rust_alloc::vec::Vec;
-    pub(crate) use rust_alloc::borrow::Cow;
 }
 
 cfg_if::cfg_if! {
@@ -149,7 +147,7 @@ mod tests {
         use core::marker::PhantomData;
 
         pub struct NonImplTrait<T> {
-            inner: PhantomData<T>
+            inner: PhantomData<T>,
         }
 
         pub struct TestTrait<TraitObj: ?Sized, Type> {
@@ -161,7 +159,10 @@ mod tests {
 
         impl<TraitObj: ?Sized, Type> TestTrait<TraitObj, Type> {
             pub fn new() -> Self {
-                TestTrait { non_impl: NonImplTrait { inner: PhantomData }, phantom: PhantomData }
+                TestTrait {
+                    non_impl: NonImplTrait { inner: PhantomData },
+                    phantom: PhantomData,
+                }
             }
         }
 
