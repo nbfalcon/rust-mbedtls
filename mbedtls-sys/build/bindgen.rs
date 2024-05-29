@@ -134,7 +134,7 @@ impl super::BuildConfig {
             if l == "unsigned char * [32] mbedtls_ssl_session_get_id__extern(const mbedtls_ssl_session *session) { return mbedtls_ssl_session_get_id(session); }" {
                 // Work around a bug in bindgen: this one signature is generated incorrectly, because of course C does not have sane parsing rules for array types
                 // It's not like the return type of a function could go at the start, or at the end; no, if arrays are involved, the function gets hugged to death syntactically.
-                "unsigned char (* mbedtls_ssl_session_get_id__extern(const mbedtls_ssl_session *session))[32] { return mbedtls_ssl_session_get_id(session); }"
+                "const unsigned char (* mbedtls_ssl_session_get_id__extern(const mbedtls_ssl_session *session))[32] { return mbedtls_ssl_session_get_id(session); }"
                 .to_owned()
             } else {
                 l.to_owned()
